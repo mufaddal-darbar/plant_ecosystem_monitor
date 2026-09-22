@@ -9,6 +9,8 @@
 #include <DHT.h>
 #include <ArduinoOTA.h>
 #include <time.h>
+#include <LittleFS.h>
+#include <WiFiManager.h>
 
 extern "C" {
   #include "user_interface.h"
@@ -67,13 +69,64 @@ int batteryPercent   = 0;
 int32_t wifiRssi     = 0;
 
 char timeStr[10]     = "--:--:--";
-char dateStr[14]     = "--/--/----";
+char dateStr[16] = "2026-01-01"; // Default ISO fallback
 
 bool telemetrySent   = false;
 bool otaInProgress   = false;
 bool otaInitialized  = false;
 unsigned long awakeStartTime = 0;
 unsigned long lastTick       = 0;
+
+struct FastConnectConfig {
+  char ssid[33];
+  char password[65];
+  int32_t channel;
+  uint8_t bssid[6];
+  uint32_t magic; // Verification marker (e.g. 0xA5A5FACE)
+};
+
+FastConnectConfig netConfig;
+const uint32_t CONFIG_MAGIC = 0xA5A5FACE;
+
+// 1. Robust File Loading
+bool loadFastConfig() {
+  if (!LittleFS.exists("/netcfg.dat")) return false;
+
+  File f = LittleFS.open("/netcfg.dat", "r");
+  if (!f) return false;
+  
+  size_t bytesRead = f.read((uint8_t*)&netConfig, sizeof(netConfig));
+  f.close();
+
+  return (bytesRead == sizeof(netConfig) && netConfig.magic == CONFIG_MAGIC);
+}
+
+// 2. Safe Parameter Extraction
+void saveFastConfig() {
+  strncpy(netConfig.ssid, WiFi.SSID().c_str(), sizeof(netConfig.ssid));
+  strncpy(netConfig.password, WiFi.psk().c_str(), sizeof(netConfig.password));
+  
+  int32_t currentCh = WiFi.channel();
+  netConfig.channel = (currentCh >= 1 && currentCh <= 14) ? currentCh : WIFI_CHANNEL;
+
+  uint8_t* bssidPtr = WiFi.BSSID();
+  if (bssidPtr != nullptr) {
+    memcpy(netConfig.bssid, bssidPtr, 6);
+  } else {
+    memcpy(netConfig.bssid, ROUTER_BSSID, 6);
+  }
+  
+  netConfig.magic = CONFIG_MAGIC;
+
+  File f = LittleFS.open("/netcfg.dat", "w");
+if (f) {
+  f.write((uint8_t*)&netConfig, sizeof(netConfig));
+  f.flush();
+  f.close();
+  Serial.println(F("[Config] Saved new Channel, BSSID & Credentials to LittleFS!"));
+}
+}
+
 
 // Helper: Show full-screen event banner on OLED
 void showOledBanner(const char* line1, const char* line2 = "", const char* line3 = "") {
@@ -98,8 +151,11 @@ void updateDateTimeStrings() {
   time_t now = time(nullptr);
   if (now > 100000) {
     struct tm* timeinfo = localtime(&now);
-    strftime(timeStr, sizeof(timeStr), "%H:%M:%S", timeinfo);
-    strftime(dateStr, sizeof(dateStr), "%d-%b-%y", timeinfo);
+    strftime(timeStr, sizeof(timeStr), "%H:%M:%S", timeinfo);    
+
+    // In updateDateTimeStrings():
+    strftime(dateStr, sizeof(dateStr), "%Y-%m-%d", timeinfo);
+    //strftime(dateStr, sizeof(dateStr), "%d-%b-%y", timeinfo);
   }
 }
 
@@ -244,54 +300,143 @@ void syncNtpTime() {
   updateDateTimeStrings();
 }
 
+// void connectWiFi() {
+//   // Ensure the Wi-Fi stack cleanly cycles from OFF to STA
+//   WiFi.disconnect(true);
+//   delay(10);
+//   WiFi.mode(WIFI_OFF);
+//   delay(20);
+//   WiFi.mode(WIFI_STA);
+//   wifi_set_opmode(STATION_MODE);
+  
+//   WiFi.setOutputPower(17.5);
+//   WiFi.begin(WIFI_SSID, WIFI_PASSWORD, WIFI_CHANNEL, ROUTER_BSSID, true);
+//   Serial.print(F("Connecting to WiFi"));
+//   showOledBanner("CONNECTING WIFI", WIFI_SSID, "Fast-locking Ch 6...");
+  
+//   wifi_station_connect();
+
+//   Serial.print(F("Connecting to WiFi"));
+//   showOledBanner("CONNECTING WIFI", WIFI_SSID, "Waiting for IP...");
+
+//   unsigned long startWait = millis();
+//   while (WiFi.status() != WL_CONNECTED && millis() - startWait < 15000) {
+//     delay(250);
+//     Serial.print(F("."));
+//     yield();
+//   }
+
+//   if (WiFi.status() == WL_CONNECTED) {
+//     wifiRssi = WiFi.RSSI();
+//     String ipStr = WiFi.localIP().toString();
+//     Serial.println(F("\n[OK] WiFi Connected!"));
+//     Serial.printf("IP: %s | RSSI: %d dBm\n", ipStr.c_str(), wifiRssi);
+
+//     showOledBanner("WIFI CONNECTED!", ipStr.c_str(), "Syncing NTP Time...");
+//     syncNtpTime();
+//     delay(800);
+
+//     if (!otaInitialized) {
+//       initArduinoOTA();
+//     } else {
+//       ArduinoOTA.begin();
+//     }
+
+//    // checkPullOTA();
+//   } else {
+//     Serial.println(F("\n[WARN] WiFi offline, running locally..."));
+//     showOledBanner("WIFI OFFLINE", "Running Local Loop", "No Sync Available");
+//     delay(1200);
+//   }
+// }
+
+
+void seedDefaultConfig() {
+  strncpy(netConfig.ssid, WIFI_SSID, sizeof(netConfig.ssid));
+  strncpy(netConfig.password, WIFI_PASSWORD, sizeof(netConfig.password));
+  netConfig.channel = WIFI_CHANNEL;
+  memcpy(netConfig.bssid, ROUTER_BSSID, 6);
+  netConfig.magic = CONFIG_MAGIC;
+}
+
 void connectWiFi() {
-  // Ensure the Wi-Fi stack cleanly cycles from OFF to STA
   WiFi.disconnect(true);
-  delay(10);
-  WiFi.mode(WIFI_OFF);
   delay(20);
   WiFi.mode(WIFI_STA);
-  wifi_set_opmode(STATION_MODE);
-  
   WiFi.setOutputPower(17.5);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD, WIFI_CHANNEL, ROUTER_BSSID, true);
-  Serial.print(F("Connecting to WiFi"));
-  showOledBanner("CONNECTING WIFI", WIFI_SSID, "Fast-locking Ch 6...");
-  
-  wifi_station_connect();
 
-  Serial.print(F("Connecting to WiFi"));
-  showOledBanner("CONNECTING WIFI", WIFI_SSID, "Waiting for IP...");
+  bool hasFastConfig = loadFastConfig();
+
+  // If no saved file exists in LittleFS, seed with our default constants
+  if (!hasFastConfig) {
+    Serial.println(F("[Config] No config found in flash, using sketch defaults..."));
+    seedDefaultConfig();
+  }
+
+  // Step 1: Attempt instant Fast Connect with Channel & BSSID
+  Serial.printf("[FastConnect] Trying %s on Ch %d...\n", netConfig.ssid, (int)netConfig.channel);
+  showOledBanner("CONNECTING WIFI", netConfig.ssid, "Fast-locking channel...");
+
+  WiFi.begin(netConfig.ssid, netConfig.password, netConfig.channel, netConfig.bssid, true);
 
   unsigned long startWait = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startWait < 15000) {
-    delay(250);
-    Serial.print(F("."));
+  while (WiFi.status() != WL_CONNECTED && (millis() - startWait < 12000)) {
+    delay(200);
     yield();
   }
 
-  if (WiFi.status() == WL_CONNECTED) {
-    wifiRssi = WiFi.RSSI();
-    String ipStr = WiFi.localIP().toString();
-    Serial.println(F("\n[OK] WiFi Connected!"));
-    Serial.printf("IP: %s | RSSI: %d dBm\n", ipStr.c_str(), wifiRssi);
+  // Step 2: Fallback to Captive Portal only if Fast Connect failed
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println(F("\n[Notice] Fast connect failed. Launching WiFiManager Portal..."));
+    
+    WiFiManager wm;
+    wm.setConfigPortalTimeout(180);
 
-    showOledBanner("WIFI CONNECTED!", ipStr.c_str(), "Syncing NTP Time...");
-    syncNtpTime();
-    delay(800);
+    wm.setAPCallback([](WiFiManager *myWiFiManager) {
+      display.clearDisplay();
+      display.setTextSize(1);
+      display.setTextColor(SSD1306_WHITE);
+      display.setCursor(0, 0);
+      display.println(F("! WIFI SETUP MODE !"));
+      display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
+      display.setCursor(0, 16);
+      display.println(F("Connect phone to:"));
+      display.setCursor(0, 28);
+      display.println(F("SSID: Plant-Config-AP"));
+      display.setCursor(0, 40);
+      display.println(F("Pass: 12345678"));
+      display.setCursor(0, 52);
+      display.println(F("IP: 192.168.4.1"));
+      display.display();
+    });
 
-    if (!otaInitialized) {
-      initArduinoOTA();
-    } else {
-      ArduinoOTA.begin();
+    if (!wm.autoConnect("Plant-Config-AP", "12345678")) {
+      Serial.println(F("[Portal Timeout] No config provided. Sleeping..."));
+      showOledBanner("SETUP TIMED OUT", "Running Local Loop", "Sleeping soon...");
+      delay(1500);
+      return;
     }
 
-   // checkPullOTA();
-  } else {
-    Serial.println(F("\n[WARN] WiFi offline, running locally..."));
-    showOledBanner("WIFI OFFLINE", "Running Local Loop", "No Sync Available");
-    delay(1200);
+    // New network configured via portal -> auto-save its Channel and BSSID
+    saveFastConfig();
   }
+
+  // --- CONNECTED ---
+  wifiRssi = WiFi.RSSI();
+  String ipStr = WiFi.localIP().toString();
+  Serial.printf("\n[OK] WiFi Connected! IP: %s | RSSI: %d dBm\n", ipStr.c_str(), (int)wifiRssi);
+
+  showOledBanner("WIFI CONNECTED!", ipStr.c_str(), "Syncing NTP Time...");
+  syncNtpTime();
+  delay(800);
+
+  if (!otaInitialized) {
+    initArduinoOTA();
+  } else {
+    ArduinoOTA.begin();
+  }
+
+  //checkPullOTA();
 }
 
 void setup() {
@@ -313,6 +458,20 @@ void setup() {
   ads.begin(0x48);
   dht.begin();
 
+// Initialize LittleFS filesystem safely
+  if (!LittleFS.begin()) {
+    Serial.println(F("[LittleFS] Mount failed! Formatting partition..."));
+    ESP.wdtDisable(); // Prevent watchdog timeout during format
+    LittleFS.format();
+    ESP.wdtEnable(1000);
+    LittleFS.begin();
+    Serial.println(F("[LittleFS] Formatted and mounted."));
+  } else {
+    Serial.println(F("[LittleFS] Mounted successfully."));
+  }
+
+
+
   connectWiFi();
 }
 
@@ -328,16 +487,8 @@ void loop() {
   unsigned long now = millis();
 
   // 30s awake window expired -> sleep for 10 minutes
-  if (now - awakeStartTime >= ACTIVE_DURATION_MS) {
+ if (now - awakeStartTime >= ACTIVE_DURATION_MS) {
     enterLightSleep(SLEEP_INTERVAL_MINUTES);
-    
-    // Reset state after sleep wake-up
-    awakeStartTime = millis();
-    lastTick = 0;
-    telemetrySent = false;
-    
-    connectWiFi();
-    return;
   }
 
   // Periodic sensor readings & OLED refresh every 1.5s
