@@ -175,11 +175,68 @@ float calculateLux(int16_t rawAdc) {
 // Empty callback for FPM sleep timer
 void lightSleepWakeCb() {}
 
-// Timed Forced Peripheral Modem (FPM) Light Sleep
-// Timed Forced Peripheral Modem (FPM) Light Sleep
+// Determine if it is nighttime using synchronized NTP clock + LDR
+bool isNightTime(float currentLux) {
+  time_t now = time(nullptr);
+  if (now > 100000) {
+    struct tm* timeinfo = localtime(&now);
+    int currentHour = timeinfo->tm_hour; // 0 - 23 (IST)
+
+    // Night window: 8:00 PM (20:00) to 6:00 AM (06:00) AND low light
+    if ((currentHour >= 20 || currentHour < 6) && (currentLux < 50.0f)) {
+      return true;
+    }
+  } else {
+    // Fallback if NTP sync failed: rely strictly on optical threshold
+    if (currentLux < 20.0f) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Unified Dynamic Power Management: Battery Level + Day/Night
+uint32_t calculateDynamicSleepMinutes(float vBatt, float currentLux) {
+  bool night = isNightTime(currentLux);
+
+  if (night) {
+    // Nighttime sleep strategy
+    if (vBatt >= 3.80f) {
+      Serial.println(F("[Power Mgmt] Night Mode (Healthy Battery): 30-min sleep cycle."));
+      return 30;
+    } else {
+      Serial.println(F("[Power Mgmt] Night Mode (Conserving Battery): 60-min sleep cycle."));
+      return 60;
+    }
+  }
+
+  // Daytime sleep strategy (Solar harvesting active)
+  if (vBatt >= 4.00f) {
+    Serial.println(F("[Power Mgmt] Daytime High Battery (>=4.00V): 5-min fast cycle."));
+    return 5;
+  } else if (vBatt >= 3.75f) {
+    Serial.println(F("[Power Mgmt] Daytime Nominal (3.75V - 3.99V): 10-min cycle."));
+    return 10;
+  } else if (vBatt >= 3.60f) {
+    Serial.println(F("[Power Mgmt] Daytime Low Battery (3.60V - 3.74V): 30-min cycle."));
+    return 30;
+  } else {
+    Serial.println(F("[Power Mgmt] Critical Battery (<3.60V): 60-min emergency cycle."));
+    return 60;
+  }
+}
+
+
 void enterLightSleep(uint32_t total_minutes) {
   Serial.println(F("\n[Light Sleep] Shutting down OLED and Wi-Fi radio..."));
-  showOledBanner("SLEEP CYCLE", "Entering Light Sleep", "Duration: 10 Min");
+
+  char sleepBanner[24];
+  snprintf(sleepBanner, sizeof(sleepBanner), "Sleep Duration: %um", total_minutes);
+
+  bool night = isNightTime(estimatedLux);
+  const char* modeLabel = night ? "NIGHT SLEEP CYCLE" : "DAY SLEEP CYCLE";
+
+  showOledBanner("POWER MANAGEMENT", modeLabel, sleepBanner);
   delay(1200);
 
   // 1. Put SSD1306 into hardware sleep
@@ -211,10 +268,8 @@ void enterLightSleep(uint32_t total_minutes) {
   Serial.println(F("\n[Light Sleep] Sleep finished! Warm resetting for clean Wi-Fi PHY..."));
   Serial.flush();
 
-  // Clean software reboot: Re-initializes WiFi PHY from scratch without cold-boot hardware bounce
   ESP.restart();
 }
-
 // Pull OTA: Checks Raspberry Pi Zero W HTTP server
 void checkPullOTA() {
   if (WiFi.status() != WL_CONNECTED) return;
@@ -486,9 +541,10 @@ void loop() {
 
   unsigned long now = millis();
 
-  // 30s awake window expired -> sleep for 10 minutes
- if (now - awakeStartTime >= ACTIVE_DURATION_MS) {
-    enterLightSleep(SLEEP_INTERVAL_MINUTES);
+// Awake window expired -> calculate dynamic sleep and shut down
+  if (now - awakeStartTime >= ACTIVE_DURATION_MS) {
+    uint32_t dynamicSleepMinutes = calculateDynamicSleepMinutes(batteryVoltage, estimatedLux);
+    enterLightSleep(dynamicSleepMinutes);
   }
 
   // Periodic sensor readings & OLED refresh every 1.5s
