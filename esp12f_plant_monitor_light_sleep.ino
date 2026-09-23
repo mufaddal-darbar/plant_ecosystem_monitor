@@ -183,7 +183,7 @@ bool isNightTime(float currentLux) {
     int currentHour = timeinfo->tm_hour; // 0 - 23 (IST)
 
     // Night window: 8:00 PM (20:00) to 6:00 AM (06:00) AND low light
-    if ((currentHour >= 20 || currentHour < 6) && (currentLux < 50.0f)) {
+    if ((currentHour >= 20 || currentHour < 6) && (currentLux < 10.0f)) {
       return true;
     }
   } else {
@@ -435,7 +435,7 @@ void connectWiFi() {
   WiFi.begin(netConfig.ssid, netConfig.password, netConfig.channel, netConfig.bssid, true);
 
   unsigned long startWait = millis();
-  while (WiFi.status() != WL_CONNECTED && (millis() - startWait < 12000)) {
+  while (WiFi.status() != WL_CONNECTED && (millis() - startWait < 15000)) {
     delay(200);
     yield();
   }
