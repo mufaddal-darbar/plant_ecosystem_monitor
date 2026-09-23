@@ -24,9 +24,9 @@ const int32_t WIFI_CHANNEL = 6;
 const uint8_t ROUTER_BSSID[] = { 0x5A, 0x23, 0xE0, 0x8C, 0x3C, 0xBC };
 
 // Telemetry Server (Raspberry Pi Zero W)
-const char* SERVER_HOST        = "192.168.31.113"; 
-const uint16_t SERVER_PORT     = 7000;
-const char* SERVER_PATH        = "/api/telemetry";
+ const char* SERVER_HOST        = "192.168.31.113"; 
+// const uint16_t SERVER_PORT     = 7000;
+//const char* SERVER_PATH        = "/api/telemetry";
 
 // OTA Pull Server (Raspberry Pi Zero W serving /home/mufaddal/esp_OTSA_binary)
 const uint16_t OTA_PULL_PORT   = 8080;
@@ -42,6 +42,16 @@ const char* NTP_SERVER_2        = "time.nist.gov";
 // ================= TIMING CONFIGURATION ==================
 const unsigned long ACTIVE_DURATION_MS = 60000; // 30s awake window
 const uint32_t SLEEP_INTERVAL_MINUTES  = 10;    // 10 minutes sleep
+
+// Change Telemetry Target to your Cloudflare Public Subdomain
+const char* PUBLIC_SERVER_HOST = "plant-dashboard.mohammadielectronics.com"; 
+const uint16_t PUBLIC_SERVER_PORT = 443;
+const char* SERVER_PATH        = "/api/telemetry";
+
+// Keep local IP for quick failover check
+const char* LOCAL_SERVER_HOST  = "192.168.31.113";
+const uint16_t LOCAL_SERVER_PORT = 7000;
+
 
 // ================= HARDWARE DEFINITIONS ==================
 #define SCREEN_WIDTH 128
@@ -183,7 +193,7 @@ bool isNightTime(float currentLux) {
     int currentHour = timeinfo->tm_hour; // 0 - 23 (IST)
 
     // Night window: 8:00 PM (20:00) to 6:00 AM (06:00) AND low light
-    if ((currentHour >= 20 || currentHour < 6) && (currentLux < 50.0f)) {
+    if ((currentHour >= 20 || currentHour < 6) && (currentLux < 20.0f)) {
       return true;
     }
   } else {
@@ -435,7 +445,7 @@ void connectWiFi() {
   WiFi.begin(netConfig.ssid, netConfig.password, netConfig.channel, netConfig.bssid, true);
 
   unsigned long startWait = millis();
-  while (WiFi.status() != WL_CONNECTED && (millis() - startWait < 12000)) {
+  while (WiFi.status() != WL_CONNECTED && (millis() - startWait < 15000)) {
     delay(200);
     yield();
   }
@@ -610,13 +620,19 @@ void loop() {
 
     display.display();
 
-    // Send HTTP POST telemetry around the 5s mark
+// Send HTTP/HTTPS telemetry around the 5s mark
     if (!telemetrySent && (now - awakeStartTime >= 5000) && (WiFi.status() == WL_CONNECTED)) {
-      WiFiClient client;
-      HTTPClient http;
-      http.setTimeout(2500);
+      
+      bool sentSuccessfully = false;
 
-      if (http.begin(client, SERVER_HOST, SERVER_PORT, SERVER_PATH)) {
+      // -------------------------------------------------------------
+      // ATTEMPT 1: Try Local LAN First (Fastest, saves battery)
+      // -------------------------------------------------------------
+      WiFiClient localClient;
+      HTTPClient http;
+      http.setTimeout(1500); // Quick 1.5s timeout if router ARP table is frozen
+
+      if (http.begin(localClient, LOCAL_SERVER_HOST, LOCAL_SERVER_PORT, SERVER_PATH)) {
         http.addHeader("Content-Type", "application/json");
 
         String payload = "{";
@@ -630,15 +646,58 @@ void loop() {
         payload += "\"timestamp\":\"" + String(dateStr) + " " + String(timeStr) + "\"";
         payload += "}";
 
-        Serial.print(F("Sending telemetry: "));
-        Serial.println(payload);
-
+        Serial.println(F("[Telemetry] Attempting local LAN transfer..."));
         int code = http.POST(payload);
-        Serial.printf("POST Response: %d\n", code);
-        http.end();
 
-        telemetrySent = true;
+        if (code == 200) {
+          Serial.printf("[Telemetry] Local POST Success! Response: %d\n", code);
+          sentSuccessfully = true;
+        } else {
+          Serial.printf("[Telemetry] Local LAN failed (code %d). Router ARP may be frozen.\n", code);
+        }
+        http.end();
       }
+
+      // -------------------------------------------------------------
+      // ATTEMPT 2: Fallback to Public Cloudflare Tunnel (Bypasses Router Bug)
+      // -------------------------------------------------------------
+      if (!sentSuccessfully) {
+        Serial.println(F("[Telemetry] Falling back to Cloudflare Tunnel URL..."));
+        
+        WiFiClientSecure secureClient;
+        secureClient.setInsecure(); // Bypass local SSL certificate validation to keep RAM free
+        secureClient.setTimeout(4000);
+
+        HTTPClient https;
+        https.setTimeout(4000);
+
+        // Connects to https://plants.mohammadielectronics.com/api/telemetry over port 443
+        if (https.begin(secureClient, PUBLIC_SERVER_HOST, PUBLIC_SERVER_PORT, SERVER_PATH, true)) {
+          https.addHeader("Content-Type", "application/json");
+
+          String payload = "{";
+          payload += "\"battery_voltage\":" + String(batteryVoltage, 2) + ",";
+          payload += "\"battery_percent\":" + String(batteryPercent) + ",";
+          payload += "\"wifi_rssi\":" + String(wifiRssi) + ",";
+          payload += "\"temperature\":" + String(currentTemp, 1) + ",";
+          payload += "\"humidity\":" + String(currentHum, 1) + ",";
+          payload += "\"soil_moisture\":" + String(soilPct, 1) + ",";
+          payload += "\"lux\":" + String(estimatedLux, 0) + ",";
+          payload += "\"timestamp\":\"" + String(dateStr) + " " + String(timeStr) + "\"";
+          payload += "}";
+
+          int httpsCode = https.POST(payload);
+          Serial.printf("[Telemetry] Cloudflare POST Response: %d\n", httpsCode);
+          if (httpsCode == 200) {
+            sentSuccessfully = true;
+          }
+          https.end();
+        } else {
+          Serial.println(F("[Telemetry] Failed to initialize Cloudflare HTTPS connection."));
+        }
+      }
+
+      telemetrySent = sentSuccessfully;
     }
   }
 
