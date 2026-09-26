@@ -9,6 +9,26 @@ DB_NAME = 'plant_data.db'
 def init_db():
     with sqlite3.connect(DB_NAME) as conn:
         conn.execute('''
+            CREATE TABLE IF NOT EXISTS device_config (
+                id INTEGER PRIMARY KEY,
+                low_batt REAL DEFAULT 3.65,
+                night_lux REAL DEFAULT 50.0,
+                day_sleep INTEGER DEFAULT 10,
+                night_sleep INTEGER DEFAULT 30,
+                config_version INTEGER DEFAULT 1,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        # Seed initial row if empty
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM device_config")
+        if cur.fetchone()[0] == 0:
+            conn.execute('''
+                INSERT INTO device_config (id, low_batt, night_lux, day_sleep, night_sleep, config_version)
+                VALUES (1, 3.65, 50.0, 10, 30, 1)
+            ''')
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.execute('''
             CREATE TABLE IF NOT EXISTS telemetry (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -103,15 +123,52 @@ def compute_derivative_metrics(conn, current_v: float, current_soil: float, curr
 
     return batt_rate_mvh, max(0.0, soil_depletion), round(total_dli, 2)
 
+
+
+@app.route('/api/config', methods=['GET'])
+def get_device_config():
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT low_batt, night_lux, day_sleep, night_sleep, config_version FROM device_config WHERE id = 1").fetchone()
+        return jsonify(dict(row)), 200
+
+@app.route('/api/config/update', methods=['POST'])
+def update_device_config():
+    data = request.get_json() or {}
+    low_batt = float(data.get('low_batt', 3.65))
+    night_lux = float(data.get('night_lux', 50.0))
+    day_sleep = int(data.get('day_sleep', 10))
+    night_sleep = int(data.get('night_sleep', 30))
+
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.execute('''
+            UPDATE device_config 
+            SET low_batt = ?, night_lux = ?, day_sleep = ?, night_sleep = ?, config_version = config_version + 1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = 1
+        ''', (low_batt, night_lux, day_sleep, night_sleep))
+
+    return jsonify({"status": "updated"}), 200
+
+
+
 @app.route('/api/telemetry', methods=['POST'])
 def receive_data():
     data = request.get_json() or {}
+
+    # Extract all incoming fields from payload
     temp = float(data.get('temperature', 0.0))
     hum = float(data.get('humidity', 0.0))
     current_v = float(data.get('battery_voltage', 0.0))
+    batt_pct = int(data.get('battery_percent', 0))       # <--- MUST BE DEFINED HERE
     current_soil = float(data.get('soil_moisture', 0.0))
     lux = float(data.get('lux', 0.0))
     rssi = int(data.get('wifi_rssi', -70))
+    charging = bool(data.get('charging', False))
+    pump_triggered = bool(data.get('pump_triggered', False))
+
+    incoming_ts = data.get('timestamp')
+    if not incoming_ts or "--" in incoming_ts:
+        incoming_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     vpd, dew = compute_instant_metrics(temp, hum)
 
@@ -119,19 +176,36 @@ def receive_data():
         batt_rate, soil_rate, dli = compute_derivative_metrics(conn, current_v, current_soil, lux)
         conn.execute('''
             INSERT INTO telemetry (
-                battery_voltage, battery_percent, charging, 
+                timestamp, battery_voltage, battery_percent, charging, 
                 temperature, humidity, soil_moisture, pump_triggered,
                 lux, wifi_rssi, vpd, dew_point, batt_rate_mvh,
                 soil_depletion_rate, dli
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            current_v, data.get('battery_percent', 0), data.get('charging', False),
-            temp, hum, current_soil, data.get('pump_triggered', False),
-            lux, rssi, vpd, dew, batt_rate, soil_rate, dli
+            incoming_ts,
+            current_v, 
+            batt_pct,          # <--- Line 134 now has access to batt_pct
+            charging,
+            temp, 
+            hum, 
+            current_soil, 
+            pump_triggered,
+            lux, 
+            rssi, 
+            vpd, 
+            dew, 
+            batt_rate, 
+            soil_rate, 
+            dli
         ))
-
-    return jsonify({"status": "success", "vpd": vpd, "dew_point": dew, "dli": dli}), 200
-
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.row_factory = sqlite3.Row
+        cfg = conn.execute("SELECT low_batt, night_lux, day_sleep, night_sleep, config_version FROM device_config WHERE id = 1").fetchone()
+    return jsonify({
+        "status": "success",
+        "config": dict(cfg)
+    }), 200
+    #return jsonify({"status": "success", "vpd": vpd, "dew_point": dew, "dli": dli}), 200
 @app.route('/api/latest', methods=['GET'])
 def get_latest():
     with sqlite3.connect(DB_NAME) as conn:
@@ -281,6 +355,29 @@ HTML_TEMPLATE = """
     <div class="chart-title">Soil Moisture (%) & Vapor Pressure Deficit (kPa)</div>
     <canvas id="chartSoilVpd" height="80"></canvas>
   </div>
+  
+  <div class="card" style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:16px; margin-top:16px;">
+  <h3 style="color:#58a6ff; margin-top:0;">Remote Dynamic Thresholds</h3>
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+    <div>
+      <label style="color:#8b949e; font-size:12px;">Low Battery (V)</label>
+      <input id="cfg_low_batt" type="number" step="0.01" style="width:100%; padding:8px; background:#0d1117; color:#fff; border:1px solid #30363d; border-radius:4px;">
+    </div>
+    <div>
+      <label style="color:#8b949e; font-size:12px;">Night Lux Cutoff</label>
+      <input id="cfg_night_lux" type="number" step="1" style="width:100%; padding:8px; background:#0d1117; color:#fff; border:1px solid #30363d; border-radius:4px;">
+    </div>
+    <div>
+      <label style="color:#8b949e; font-size:12px;">Day Sleep (min)</label>
+      <input id="cfg_day_sleep" type="number" step="1" style="width:100%; padding:8px; background:#0d1117; color:#fff; border:1px solid #30363d; border-radius:4px;">
+    </div>
+    <div>
+      <label style="color:#8b949e; font-size:12px;">Night Sleep (min)</label>
+      <input id="cfg_night_sleep" type="number" step="1" style="width:100%; padding:8px; background:#0d1117; color:#fff; border:1px solid #30363d; border-radius:4px;">
+    </div>
+  </div>
+  <button onclick="saveRemoteConfig()" style="width:100%; margin-top:14px; padding:10px; background:#238636; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">Push Config to Node</button>
+   </div>
 
   <script>
     let battChart, soilVpdChart;
@@ -416,6 +513,33 @@ HTML_TEMPLATE = """
       refresh();
       setInterval(refresh, 15000);
     };
+    
+    async function loadCurrentConfig() {
+  const res = await fetch('/api/config');
+  const d = await res.json();
+  document.getElementById('cfg_low_batt').value = d.low_batt;
+  document.getElementById('cfg_night_lux').value = d.night_lux;
+  document.getElementById('cfg_day_sleep').value = d.day_sleep;
+  document.getElementById('cfg_night_sleep').value = d.night_sleep;
+}
+
+async function saveRemoteConfig() {
+  const payload = {
+    low_batt: parseFloat(document.getElementById('cfg_low_batt').value),
+    night_lux: parseFloat(document.getElementById('cfg_night_lux').value),
+    day_sleep: parseInt(document.getElementById('cfg_day_sleep').value),
+    night_sleep: parseInt(document.getElementById('cfg_night_sleep').value)
+  };
+  await fetch('/api/config/update', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  });
+  alert('Configuration pushed! ESP will synchronize on next wake.');
+}
+window.onload = () => { loadCurrentConfig(); };
+    
+    
   </script>
 </body>
 </html>

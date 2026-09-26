@@ -105,15 +105,6 @@ SystemThresholds sysThresh = { 3.65f, 50.0f, 10, 30, 0, 0xABCD1234 };
 FastConnectConfig netConfig;
 const uint32_t CONFIG_MAGIC = 0xA5A5FACE;
 
-struct SystemThresholds {
-  float lowBattThreshold;     // e.g., 3.65 V
-  float nightLuxThreshold;    // e.g., 50.0 Lux
-  uint32_t daySleepMinutes;   // e.g., 10 Min
-  uint32_t nightSleepMinutes; // e.g., 30 Min
-  uint32_t magic;
-};
-
-SystemThresholds sysThresh = { 3.65f, 50.0f, 10, 30, 0xABCD1234 };
 const uint32_t THRESH_MAGIC = 0xABCD1234;
 
 // Forward Declarations
@@ -740,7 +731,7 @@ void loop() {
           https.addHeader("Content-Type", "application/json");
           int httpsCode = https.POST(payload);
           Serial.printf("[Telemetry] Cloudflare POST Response: %d\n", httpsCode);
-          if (code == 200) {
+          if (httpsCode == 200) {
             String response = http.getString();
             StaticJsonDocument<384> doc;
             DeserializationError err = deserializeJson(doc, response);
