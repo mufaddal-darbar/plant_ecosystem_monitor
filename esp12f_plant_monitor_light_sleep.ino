@@ -11,6 +11,7 @@
 #include <time.h>
 #include <LittleFS.h>
 #include <WiFiManager.h>
+#include <ArduinoJson.h> // Ensure ArduinoJson v6 is installed
 
 extern "C" {
   #include "user_interface.h"
@@ -94,6 +95,17 @@ struct FastConnectConfig {
   uint8_t bssid[6];
   uint32_t magic; // Verification marker (e.g. 0xA5A5FACE)
 };
+
+struct SystemThresholds {
+  float lowBattThreshold;
+  float nightLuxThreshold;
+  uint32_t daySleepMinutes;
+  uint32_t nightSleepMinutes;
+  uint32_t configVersion; // <--- Tracks sync version
+  uint32_t magic;
+};
+
+SystemThresholds sysThresh = { 3.65f, 50.0f, 10, 30, 0, 0xABCD1234 };
 
 FastConnectConfig netConfig;
 const uint32_t CONFIG_MAGIC = 0xA5A5FACE;
@@ -650,9 +662,29 @@ void loop() {
         int code = http.POST(payload);
 
         if (code == 200) {
-          Serial.printf("[Telemetry] Local POST Success! Response: %d\n", code);
-          sentSuccessfully = true;
-        } else {
+          String response = http.getString();
+          StaticJsonDocument<384> doc;
+          DeserializationError err = deserializeJson(doc, response);
+
+          if (!err && doc.containsKey("config")) {
+            JsonObject cfg = doc["config"];
+            uint32_t serverVer = cfg["config_version"];
+
+            // Only commit to Flash if settings actually changed
+            if (serverVer != sysThresh.configVersion) {
+              sysThresh.lowBattThreshold = cfg["low_batt"] | sysThresh.lowBattThreshold;
+              sysThresh.nightLuxThreshold = cfg["night_lux"] | sysThresh.nightLuxThreshold;
+              sysThresh.daySleepMinutes = cfg["day_sleep"] | sysThresh.daySleepMinutes;
+              sysThresh.nightSleepMinutes = cfg["night_sleep"] | sysThresh.nightSleepMinutes;
+              sysThresh.configVersion = serverVer;
+
+              saveThresholds(); // Save to /thresholds.dat in LittleFS
+              Serial.printf("[Config] Synced remote version %u to LittleFS!\n", serverVer);
+            }
+          }
+          sentSuccessfully = true; 
+        }
+        else {
           Serial.printf("[Telemetry] Local LAN failed (code %d). Router ARP may be frozen.\n", code);
         }
         http.end();
@@ -688,8 +720,28 @@ void loop() {
 
           int httpsCode = https.POST(payload);
           Serial.printf("[Telemetry] Cloudflare POST Response: %d\n", httpsCode);
-          if (httpsCode == 200) {
-            sentSuccessfully = true;
+          if (code == 200) {
+            String response = http.getString();
+            StaticJsonDocument<384> doc;
+            DeserializationError err = deserializeJson(doc, response);
+
+            if (!err && doc.containsKey("config")) {
+              JsonObject cfg = doc["config"];
+              uint32_t serverVer = cfg["config_version"];
+
+              // Only commit to Flash if settings actually changed
+              if (serverVer != sysThresh.configVersion) {
+                sysThresh.lowBattThreshold = cfg["low_batt"] | sysThresh.lowBattThreshold;
+                sysThresh.nightLuxThreshold = cfg["night_lux"] | sysThresh.nightLuxThreshold;
+                sysThresh.daySleepMinutes = cfg["day_sleep"] | sysThresh.daySleepMinutes;
+                sysThresh.nightSleepMinutes = cfg["night_sleep"] | sysThresh.nightSleepMinutes;
+                sysThresh.configVersion = serverVer;
+
+                saveThresholds(); // Save to /thresholds.dat in LittleFS
+                Serial.printf("[Config] Synced remote version %u to LittleFS!\n", serverVer);
+              }
+            }
+            sentSuccessfully =  true; 
           }
           https.end();
         } else {
