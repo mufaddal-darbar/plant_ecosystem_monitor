@@ -201,10 +201,13 @@ def receive_data():
     with sqlite3.connect(DB_NAME) as conn:
         conn.row_factory = sqlite3.Row
         cfg = conn.execute("SELECT low_batt, night_lux, day_sleep, night_sleep, config_version FROM device_config WHERE id = 1").fetchone()
-    return jsonify({
-        "status": "success",
-        "config": dict(cfg)
-    }), 200
+    esp_ver = int(data.get('config_ver', 0))
+    server_ver = int(cfg['config_version'])
+
+    resp = {"status": "success"}
+    if esp_ver < server_ver:
+        resp["config"] = dict(cfg)
+    return jsonify(resp), 200
     #return jsonify({"status": "success", "vpd": vpd, "dew_point": dew, "dli": dli}), 200
 @app.route('/api/latest', methods=['GET'])
 def get_latest():
@@ -511,6 +514,7 @@ HTML_TEMPLATE = """
     window.onload = () => {
       initCharts();
       refresh();
+      loadCurrentConfig();
       setInterval(refresh, 15000);
     };
     

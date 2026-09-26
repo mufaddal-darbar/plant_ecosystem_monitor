@@ -675,6 +675,7 @@ void loop() {
       payload += "\"soil_moisture\":" + String(soilPct, 1) + ",";
       payload += "\"lux\":" + String(estimatedLux, 0) + ",";
       payload += "\"timestamp\":\"" + String(dateStr) + " " + String(timeStr) + "\"";
+      payload += "\"config_ver\":" + String(sysThresh.configVersion);
       payload += "}";
 
       // Attempt 1: Local LAN
