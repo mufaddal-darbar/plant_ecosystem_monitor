@@ -2,6 +2,8 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify
 from database import get_db
 from agronomy import compute_instant_metrics, compute_derivative_metrics
+from ai_service import analyze_plant_health
+from notifier import send_telegram_message
 
 telemetry_bp = Blueprint('telemetry_bp', __name__)
 
@@ -50,7 +52,12 @@ def receive_data():
     # Attach configuration ONLY if the ESP node is running an older version
     if esp_version < server_ver:
         resp["config"] = dict(cfg)
+    # Immediate Critical Threshold Alerts
+    if current_v > 0.5 and current_v < 3.55:
+        send_telegram_message(f"🔋 *Critical Battery Alert!* Voltage dropped to `{current_v:.2f}V`. Solar charging needed.")
 
+    if current_soil < 15.0:
+        send_telegram_message(f"🚨 *Critical Soil Drought!* Soil moisture is `{current_soil:.1f}%`. Immediate watering required.")
     return jsonify(resp), 200
 
 @telemetry_bp.route('/api/latest', methods=['GET'])
@@ -65,3 +72,16 @@ def get_history():
     with get_db() as conn:
         rows = conn.execute("SELECT * FROM (SELECT * FROM telemetry ORDER BY id DESC LIMIT ?) ORDER BY id ASC", (limit,)).fetchall()
         return jsonify([dict(r) for r in rows])
+
+
+@telemetry_bp.route('/api/ai/latest', methods=['GET'])
+def get_latest_ai_insight():
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM ai_insights ORDER BY id DESC LIMIT 1").fetchone()
+        return jsonify(dict(row)) if row else jsonify({})
+
+@telemetry_bp.route('/api/ai/analyze', methods=['POST'])
+def trigger_ai_analysis():
+    # Runs the AI diagnostic model and returns the output
+    result = analyze_plant_health()
+    return jsonify(result), 200

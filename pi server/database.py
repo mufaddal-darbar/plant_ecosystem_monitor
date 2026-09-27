@@ -51,6 +51,19 @@ def init_db():
             )
         ''')
         
+        # Add inside init_db() in database.py
+    with get_db() as conn:
+        conn.execute('''
+        CREATE TABLE IF NOT EXISTS ai_insights (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            summary TEXT,
+            irrigation_advice TEXT,
+            anomaly_detected BOOLEAN,
+            model_used TEXT
+        )
+    ''')
+        
         # Safe column migrations
         cursor = conn.cursor()
         cursor.execute("PRAGMA table_info(telemetry)")

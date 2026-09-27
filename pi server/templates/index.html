@@ -113,6 +113,26 @@
     </div>
     <button onclick="saveRemoteConfig()" style="width:100%; margin-top:14px; padding:10px; background:#238636; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">Push Config to Node</button>
   </div>
+  
+  <div class="card" style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:16px; margin-bottom:18px;">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+    <h3 style="color:#bc8cff; margin:0; display:flex; align-items:center; gap:8px;">
+      🤖 Agronomic AI Diagnostics
+    </h3>
+    <button onclick="requestAiAnalysis()" id="btn-run-ai" style="padding:6px 14px; background:#21262d; border:1px solid #30363d; color:#c9d1d9; border-radius:6px; cursor:pointer; font-size:0.8rem;">
+      ⚡ Run Analysis
+    </button>
+  </div>
+  
+  <p id="ai-summary" style="font-size:0.92rem; color:#f0f6fc; line-height:1.4; margin-bottom:8px;">
+    No analysis generated yet. Click "Run Analysis" to evaluate the last 24h cycle.
+  </p>
+  
+  <div style="background:#0d1117; border-left:3px solid #58a6ff; padding:8px 12px; border-radius:4px; font-size:0.85rem; color:#8b949e;">
+    <strong style="color:#58a6ff;">Irrigation Advice:</strong> <span id="ai-advice">--</span>
+  </div>
+  <div id="ai-timestamp" style="font-size:0.7rem; color:#8b949e; margin-top:8px; text-align:right;"></div>
+</div>
 
   <script>
     let battChart, soilVpdChart;
@@ -234,14 +254,53 @@
       });
       alert('Configuration pushed! ESP will synchronize on next wake.');
     }
+	
+	
+	async function loadLatestAiInsight() {
+  try {
+    const res = await fetch('/api/ai/latest');
+    const data = await res.json();
+    if (data && data.summary) {
+      document.getElementById('ai-summary').innerText = data.summary;
+      document.getElementById('ai-advice').innerText = data.irrigation_advice;
+      document.getElementById('ai-timestamp').innerText = `Evaluated: ${data.timestamp} (${data.model_used})`;
+    }
+  } catch(e) {
+    console.error("AI Insight load error:", e);
+  }
+}
+
+async function requestAiAnalysis() {
+  const btn = document.getElementById('btn-run-ai');
+  btn.innerText = "Analyzing...";
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/ai/analyze', { method: 'POST' });
+    const data = await res.json();
+    if (data.summary) {
+      document.getElementById('ai-summary').innerText = data.summary;
+      document.getElementById('ai-advice').innerText = data.irrigation_advice;
+      document.getElementById('ai-timestamp').innerText = `Evaluated: Just now`;
+    } else if (data.error) {
+      alert("AI Error: " + data.error);
+    }
+  } catch(e) {
+    alert("Request failed: " + e);
+  } finally {
+    btn.innerText = "⚡ Run Analysis";
+    btn.disabled = false;
+  }
+}
 
     // Consolidated single initialization handler
-    window.onload = () => {
-      initCharts();
-      refresh();
-      loadCurrentConfig();
-      setInterval(refresh, 15000);
-    };
+  window.onload = () => {
+  initCharts();
+  refresh();
+  loadCurrentConfig();
+  loadLatestAiInsight(); // <--- Fetch last saved insight on page open
+  setInterval(refresh, 15000);
+};
   </script>
 </body>
 </html>
