@@ -3,304 +3,269 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Plant & Solar Telemetry Hub</title>
+  <title>Aura Flora // Microclimate Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <style>
-    :root {
-      --bg: #0d1117; --card-bg: #161b22; --border: #30363d;
-      --text: #c9d1d9; --text-muted: #8b949e; --green: #238636;
-      --yellow: #d29922; --red: #da3633; --blue: #58a6ff;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background-color: var(--bg); color: var(--text); padding: 16px; min-height: 100vh; }
-    header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 14px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
-    h1 { font-size: 1.2rem; color: #f0f6fc; display: flex; align-items: center; gap: 8px; }
-    .status-badge { font-size: 0.8rem; padding: 4px 10px; border-radius: 12px; background: #21262d; border: 1px solid var(--border); }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 18px; }
-    .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; border-left: 4px solid var(--border); }
-    .card-title { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; display: flex; justify-content: space-between; }
-    .card-value { font-size: 1.45rem; font-weight: 700; color: #f0f6fc; display: flex; align-items: baseline; gap: 4px; }
-    .card-sub { font-size: 0.74rem; color: var(--text-muted); margin-top: 4px; }
-    .warn-icon { color: var(--red); display: none; font-size: 1rem; }
-    .card.status-good { border-left-color: var(--green); }
-    .card.status-warn { border-left-color: var(--yellow); }
-    .card.status-crit { border-left-color: var(--red); }
-    .card.status-crit .warn-icon { display: inline; animation: blink 1s infinite; }
-    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
-    .chart-container { background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 16px; }
-    .chart-title { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 8px; }
-  </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
 
-  <header>
-    <h1>🌱 Plant Ecosystem Monitor</h1>
-    <div class="status-badge" id="last-seen">Connecting...</div>
-  </header>
-
-  <div class="grid">
-    <div class="card" id="card-soil">
-      <div class="card-title">Soil Moisture <span class="warn-icon" id="warn-soil">⚠️</span></div>
-      <div class="card-value"><span id="val-soil">--</span><small>%</small></div>
-      <div class="card-sub">Depletion: <span id="val-soil-rate">0.0</span> %/day</div>
-    </div>
-    <div class="card" id="card-batt">
-      <div class="card-title">Battery Level <span class="warn-icon" id="warn-batt">⚠️</span></div>
-      <div class="card-value"><span id="val-batt-v">--</span><small>V</small></div>
-      <div class="card-sub" id="sub-batt-rate">Rate: -- mV/h</div>
-    </div>
-    <div class="card" id="card-vpd">
-      <div class="card-title">VPD (Transpiration) <span class="warn-icon" id="warn-vpd">⚠️</span></div>
-      <div class="card-value"><span id="val-vpd">--</span><small>kPa</small></div>
-      <div class="card-sub">Optimum: 0.8 - 1.2</div>
-    </div>
-    <div class="card" id="card-dew">
-      <div class="card-title">Dew Point</div>
-      <div class="card-value"><span id="val-dew">--</span><small>°C</small></div>
-      <div class="card-sub" id="sub-dew-margin">Condensation Margin</div>
-    </div>
-    <div class="card" id="card-temp">
-      <div class="card-title">Air Temperature</div>
-      <div class="card-value"><span id="val-temp">--</span><small>°C</small></div>
-      <div class="card-sub">Ambient Sensor</div>
-    </div>
-    <div class="card" id="card-hum">
-      <div class="card-title">Humidity</div>
-      <div class="card-value"><span id="val-hum">--</span><small>%</small></div>
-      <div class="card-sub">Ambient RH</div>
-    </div>
-    <div class="card" id="card-dli">
-      <div class="card-title">Daily Light (DLI)</div>
-      <div class="card-value"><span id="val-dli">--</span><small>mol</small></div>
-      <div class="card-sub">Cumulative Today</div>
-    </div>
-    <div class="card" id="card-lux">
-      <div class="card-title">Solar Radiation</div>
-      <div class="card-value"><span id="val-lux">--</span><small>Lux</small></div>
-      <div class="card-sub" id="sub-lux">Light Status</div>
-    </div>
-  </div>
-
-  <div class="chart-container">
-    <div class="chart-title">Battery Voltage (V) & Solar Charge Recovery</div>
-    <canvas id="chartBattery" height="80"></canvas>
-  </div>
-
-  <div class="chart-container">
-    <div class="chart-title">Soil Moisture (%) & Vapor Pressure Deficit (kPa)</div>
-    <canvas id="chartSoilVpd" height="80"></canvas>
-  </div>
-
-  <div class="card" style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:16px;">
-    <h3 style="color:#58a6ff; margin-bottom:12px;">Remote Dynamic Thresholds</h3>
-    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
-      <div>
-        <label style="color:#8b949e; font-size:12px;">Low Battery (V)</label>
-        <input id="cfg_low_batt" type="number" step="0.01" style="width:100%; padding:8px; background:#0d1117; color:#fff; border:1px solid #30363d; border-radius:4px;">
+  <div class="wrapper">
+    <header>
+      <div class="brand">
+        <div class="brand-logo">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/>
+            <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>
+          </svg>
+        </div>
+        <div>
+          <div class="brand-title">
+            Plant & Microclimate Node
+            <span class="brand-tag">v2.4 LTS</span>
+          </div>
+        </div>
       </div>
-      <div>
-        <label style="color:#8b949e; font-size:12px;">Night Lux Cutoff</label>
-        <input id="cfg_night_lux" type="number" step="1" style="width:100%; padding:8px; background:#0d1117; color:#fff; border:1px solid #30363d; border-radius:4px;">
+
+      <div class="nav-controls">
+        <div class="nav-tabs">
+          <button class="tab-btn active" onclick="switchNavTab(event, 'tab-telemetry')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            Telemetry
+          </button>
+          <button class="tab-btn" onclick="switchNavTab(event, 'tab-config')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Thresholds & Downlink
+          </button>
+        </div>
+        <div class="pulse-pill">
+          <span class="pulse-dot"></span>
+          <span id="label-sync">Syncing...</span>
+        </div>
       </div>
-      <div>
-        <label style="color:#8b949e; font-size:12px;">Day Sleep (min)</label>
-        <input id="cfg_day_sleep" type="number" step="1" style="width:100%; padding:8px; background:#0d1117; color:#fff; border:1px solid #30363d; border-radius:4px;">
+    </header>
+
+    <!-- TAB 1: TELEMETRY -->
+    <div id="tab-telemetry" class="tab-panel active">
+      <div class="status-strip">
+        <div class="strip-card">
+          <span class="strip-label">Wi-Fi RSSI</span>
+          <span class="strip-value" id="strip-rssi">-- dBm</span>
+        </div>
+        <div class="strip-card">
+          <span class="strip-label">Condensation Margin</span>
+          <span class="strip-value" id="strip-dew">-- °C</span>
+        </div>
+        <div class="strip-card">
+          <span class="strip-label">Solar State</span>
+          <span class="strip-value" id="strip-solar">Determining...</span>
+        </div>
+        <div class="strip-card">
+          <span class="strip-label">Config Sync Version</span>
+          <span class="strip-value" id="strip-cfg-ver">v--</span>
+        </div>
       </div>
-      <div>
-        <label style="color:#8b949e; font-size:12px;">Night Sleep (min)</label>
-        <input id="cfg_night_sleep" type="number" step="1" style="width:100%; padding:8px; background:#0d1117; color:#fff; border:1px solid #30363d; border-radius:4px;">
+
+      <div class="metric-grid">
+        <div class="metric-card card-emerald">
+          <div class="card-top">
+            <span class="card-title">Soil Volumetric</span>
+            <span class="card-badge badge-neutral" id="badge-soil">Normal</span>
+          </div>
+          <div class="card-body">
+            <div class="card-val"><span id="val-soil">--</span><small>%</small></div>
+            <div class="gauge-wrapper">
+              <svg class="gauge-svg" viewBox="0 0 44 44">
+                <circle class="gauge-bg" cx="22" cy="22" r="18"/>
+                <circle class="gauge-meter" id="meter-soil" cx="22" cy="22" r="18" stroke="#10b981"/>
+              </svg>
+              <div class="gauge-text" id="text-meter-soil">--%</div>
+            </div>
+          </div>
+          <div class="card-foot">
+            <span>Depletion Slope</span>
+            <strong><span id="val-soil-rate">0.0</span> %/day</strong>
+          </div>
+        </div>
+
+        <div class="metric-card card-indigo">
+          <div class="card-top">
+            <span class="card-title">Li-ion Storage</span>
+            <span class="card-badge badge-neutral" id="badge-batt">--%</span>
+          </div>
+          <div class="card-body">
+            <div class="card-val"><span id="val-batt-v">--</span><small>V</small></div>
+            <div class="gauge-wrapper">
+              <svg class="gauge-svg" viewBox="0 0 44 44">
+                <circle class="gauge-bg" cx="22" cy="22" r="18"/>
+                <circle class="gauge-meter" id="meter-batt" cx="22" cy="22" r="18" stroke="#6366f1"/>
+              </svg>
+              <div class="gauge-text" id="text-meter-batt">--%</div>
+            </div>
+          </div>
+          <div class="card-foot">
+            <span>Net Rate Flow</span>
+            <strong><span id="val-batt-rate">--</span> mV/h</strong>
+          </div>
+        </div>
+
+        <div class="metric-card card-amber">
+          <div class="card-top">
+            <span class="card-title">Vapor Pressure Deficit</span>
+            <span class="card-badge badge-good" id="badge-vpd">Target</span>
+          </div>
+          <div class="card-body">
+            <div class="card-val"><span id="val-vpd">--</span><small>kPa</small></div>
+            <div class="gauge-wrapper">
+              <svg class="gauge-svg" viewBox="0 0 44 44">
+                <circle class="gauge-bg" cx="22" cy="22" r="18"/>
+                <circle class="gauge-meter" id="meter-vpd" cx="22" cy="22" r="18" stroke="#f59e0b"/>
+              </svg>
+              <div class="gauge-text" id="text-meter-vpd">--</div>
+            </div>
+          </div>
+          <div class="card-foot">
+            <span>Transpiration Status</span>
+            <strong id="val-transpiration">Evaluating...</strong>
+          </div>
+        </div>
+
+        <div class="metric-card card-cyan">
+          <div class="card-top">
+            <span class="card-title">Solar Radiation</span>
+            <span class="card-badge badge-neutral" id="badge-dli">-- mol</span>
+          </div>
+          <div class="card-body">
+            <div class="card-val"><span id="val-lux">--</span><small>Lux</small></div>
+            <div class="gauge-wrapper">
+              <svg class="gauge-svg" viewBox="0 0 44 44">
+                <circle class="gauge-bg" cx="22" cy="22" r="18"/>
+                <circle class="gauge-meter" id="meter-lux" cx="22" cy="22" r="18" stroke="#06b6d4"/>
+              </svg>
+              <div class="gauge-text" id="text-meter-lux">SUN</div>
+            </div>
+          </div>
+          <div class="card-foot">
+            <span>Daily Light Integral</span>
+            <strong><span id="val-dli">--</span> mol/m²·d</strong>
+          </div>
+        </div>
+      </div>
+
+      <div class="secondary-grid">
+        <div class="mini-card">
+          <div class="mini-card-head"><span>Ambient Temp</span><span>DHT22</span></div>
+          <div class="mini-card-val"><span id="val-temp">--</span>°C</div>
+          <div class="mini-card-sub">Microclimate thermal</div>
+        </div>
+        <div class="mini-card">
+          <div class="mini-card-head"><span>Relative Humidity</span><span>Air</span></div>
+          <div class="mini-card-val"><span id="val-hum">--</span>%</div>
+          <div class="mini-card-sub">Dew Point: <strong id="val-dew">--</strong>°C</div>
+        </div>
+        <div class="mini-card">
+          <div class="mini-card-head"><span>Raw ADC Soil</span><span>ADS1115 A1</span></div>
+          <div class="mini-card-val"><span id="val-raw-soil">--</span></div>
+          <div class="mini-card-sub">Dry: 17.5k | Wet: 8.9k</div>
+        </div>
+        <div class="mini-card">
+          <div class="mini-card-head"><span>Power Flow</span><span>Charge</span></div>
+          <div class="mini-card-val"><span id="val-power-state">--</span></div>
+          <div class="mini-card-sub" id="val-power-sub">Sampling slope...</div>
+        </div>
+      </div>
+
+      <div class="charts-grid">
+        <div class="chart-container">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Battery Terminal Voltage & Charge Recovery</div>
+              <div class="chart-subtitle">Li-ion 3.2V to 4.2V Curve with Solar Gain</div>
+            </div>
+          </div>
+          <canvas id="chartBattery"></canvas>
+        </div>
+
+        <div class="chart-container">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Moisture Depletion & Vapor Pressure Deficit</div>
+              <div class="chart-subtitle">Capacitive Infiltration (%) vs Transpiration Pull (kPa)</div>
+            </div>
+          </div>
+          <canvas id="chartSoilVpd"></canvas>
+        </div>
       </div>
     </div>
-    <button onclick="saveRemoteConfig()" style="width:100%; margin-top:14px; padding:10px; background:#238636; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">Push Config to Node</button>
+
+    <!-- TAB 2: CONFIGURATION -->
+    <div id="tab-config" class="tab-panel">
+      <div class="config-box">
+        <div class="config-header">
+          <div>
+            <div class="config-title">Edge Device Threshold Downlink</div>
+            <div class="config-desc">Thresholds updated here increment the remote config version. The ESP8266 pulls and applies them on next cycle without flash wear.</div>
+          </div>
+          <div class="config-badge" id="cfg-version-badge">Version 1</div>
+        </div>
+
+        <div class="config-body">
+          <div class="config-section-title">Power Protection & Sleep Durations</div>
+          <div class="form-row">
+            <div class="form-item">
+              <div class="form-item-head">
+                <label>Low Battery Cutoff</label>
+                <span class="form-item-unit">VOLTS (V)</span>
+              </div>
+              <input id="cfg_low_batt" type="number" step="0.01" min="3.0" max="4.2">
+              <div class="form-item-help">Forces node into emergency 60-minute sleep cycles when breached.</div>
+            </div>
+
+            <div class="form-item">
+              <div class="form-item-head">
+                <label>Night Darkness Cutoff</label>
+                <span class="form-item-unit">LUX</span>
+              </div>
+              <input id="cfg_night_lux" type="number" step="1" min="0" max="500">
+              <div class="form-item-help">Threshold below which daytime light sleep transitions into night sleep.</div>
+            </div>
+          </div>
+
+          <div class="config-section-title">Awake Scheduling Timers</div>
+          <div class="form-row">
+            <div class="form-item">
+              <div class="form-item-head">
+                <label>Day Sleep Interval</label>
+                <span class="form-item-unit">MINUTES</span>
+              </div>
+              <input id="cfg_day_sleep" type="number" step="1" min="1" max="180">
+              <div class="form-item-help">Sleep interval during active solar collection windows.</div>
+            </div>
+
+            <div class="form-item">
+              <div class="form-item-head">
+                <label>Night Sleep Interval</label>
+                <span class="form-item-unit">MINUTES</span>
+              </div>
+              <input id="cfg_night_sleep" type="number" step="1" min="1" max="360">
+              <div class="form-item-help">Deep conservation sleep interval during dark hours.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="config-footer">
+          <div class="save-alert" id="save-feedback">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Config incremented! Downlink queued for next node wake-up.
+          </div>
+          <button class="btn-submit" onclick="saveRemoteConfig()">Push Config Downlink</button>
+        </div>
+      </div>
+    </div>
   </div>
-  
-  <div class="card" style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:16px; margin-bottom:18px;">
-  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-    <h3 style="color:#bc8cff; margin:0; display:flex; align-items:center; gap:8px;">
-      🤖 Agronomic AI Diagnostics
-    </h3>
-    <button onclick="requestAiAnalysis()" id="btn-run-ai" style="padding:6px 14px; background:#21262d; border:1px solid #30363d; color:#c9d1d9; border-radius:6px; cursor:pointer; font-size:0.8rem;">
-      ⚡ Run Analysis
-    </button>
-  </div>
-  
-  <p id="ai-summary" style="font-size:0.92rem; color:#f0f6fc; line-height:1.4; margin-bottom:8px;">
-    No analysis generated yet. Click "Run Analysis" to evaluate the last 24h cycle.
-  </p>
-  
-  <div style="background:#0d1117; border-left:3px solid #58a6ff; padding:8px 12px; border-radius:4px; font-size:0.85rem; color:#8b949e;">
-    <strong style="color:#58a6ff;">Irrigation Advice:</strong> <span id="ai-advice">--</span>
-  </div>
-  <div id="ai-timestamp" style="font-size:0.7rem; color:#8b949e; margin-top:8px; text-align:right;"></div>
-</div>
 
-  <script>
-    let battChart, soilVpdChart;
-
-    function initCharts() {
-      const ctxBatt = document.getElementById('chartBattery').getContext('2d');
-      battChart = new Chart(ctxBatt, {
-        type: 'line',
-        data: { labels: [], datasets: [{ label: 'Battery (V)', data: [], borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,0.08)', fill: true, tension: 0.25 }] },
-        options: {
-          responsive: true,
-          plugins: { legend: { display: false } },
-          scales: {
-            x: { grid: { color: '#21262d' }, ticks: { color: '#8b949e', maxTicksLimit: 8 } },
-            y: { min: 3.2, max: 4.25, grid: { color: '#21262d' }, ticks: { color: '#8b949e' } }
-          }
-        }
-      });
-
-      const ctxSoil = document.getElementById('chartSoilVpd').getContext('2d');
-      soilVpdChart = new Chart(ctxSoil, {
-        type: 'line',
-        data: {
-          labels: [],
-          datasets: [
-            { label: 'Soil Moisture (%)', data: [], borderColor: '#39c5bb', yAxisID: 'ySoil', tension: 0.25 },
-            { label: 'VPD (kPa)', data: [], borderColor: '#d29922', borderDash: [5, 5], yAxisID: 'yVpd', tension: 0.25 }
-          ]
-        },
-        options: {
-          responsive: true,
-          scales: {
-            x: { grid: { color: '#21262d' }, ticks: { color: '#8b949e', maxTicksLimit: 8 } },
-            ySoil: { type: 'linear', position: 'left', min: 0, max: 100, grid: { color: '#21262d' }, ticks: { color: '#8b949e' } },
-            yVpd: { type: 'linear', position: 'right', min: 0, max: 2.5, grid: { display: false }, ticks: { color: '#8b949e' } }
-          }
-        }
-      });
-    }
-
-    async function refresh() {
-      try {
-        const rLatest = await fetch('/api/latest');
-        const d = await rLatest.json();
-        if (!d || !d.id) return;
-
-        document.getElementById('val-soil').innerText = (d.soil_moisture || 0).toFixed(1);
-        document.getElementById('val-batt-v').innerText = (d.battery_voltage || 0).toFixed(2);
-        
-        const bRate = d.batt_rate_mvh || 0;
-        const bSign = bRate > 0 ? '▲ +' : (bRate < 0 ? '▼ ' : '');
-        document.getElementById('sub-batt-rate').innerText = `${bSign}${bRate.toFixed(1)} mV/h (${d.battery_percent}%)`;
-
-        document.getElementById('val-vpd').innerText = (d.vpd || 0).toFixed(2);
-        document.getElementById('val-dew').innerText = (d.dew_point || 0).toFixed(1);
-        document.getElementById('sub-dew-margin').innerText = `+${(d.temperature - d.dew_point).toFixed(1)}°C above dew`;
-
-        document.getElementById('val-temp').innerText = (d.temperature || 0).toFixed(1);
-        document.getElementById('val-hum').innerText = (d.humidity || 0).toFixed(1);
-        document.getElementById('val-dli').innerText = (d.dli || 0).toFixed(2);
-        document.getElementById('val-lux').innerText = Math.round(d.lux || 0).toLocaleString();
-        document.getElementById('last-seen').innerText = `Synced: ${d.timestamp ? d.timestamp.split(' ')[1] : ''}`;
-
-        // Status thresholds
-        const cSoil = document.getElementById('card-soil');
-        cSoil.className = 'card ' + (d.soil_moisture < 20 || d.soil_moisture > 80 ? 'status-crit' : (d.soil_moisture < 30 ? 'status-warn' : 'status-good'));
-        document.getElementById('warn-soil').style.display = (d.soil_moisture < 20 || d.soil_moisture > 80) ? 'inline' : 'none';
-
-        const cBatt = document.getElementById('card-batt');
-        cBatt.className = 'card ' + (d.battery_voltage < 3.55 ? 'status-crit' : (d.battery_voltage < 3.75 ? 'status-warn' : 'status-good'));
-        document.getElementById('warn-batt').style.display = (d.battery_voltage < 3.55) ? 'inline' : 'none';
-
-        const cVpd = document.getElementById('card-vpd');
-        cVpd.className = 'card ' + (d.vpd < 0.4 || d.vpd > 1.6 ? 'status-warn' : 'status-good');
-        document.getElementById('sub-lux').innerText = (d.lux > 500) ? '☀️ Solar Harvesting' : '🌙 Low Light / Night';
-
-        // History Chart refresh
-        const rHist = await fetch('/api/history?limit=36');
-        const hist = await rHist.json();
-        const labels = hist.map(h => (h.timestamp ? h.timestamp.split(' ')[1] : ''));
-
-        battChart.data.labels = labels;
-        battChart.data.datasets[0].data = hist.map(h => h.battery_voltage);
-        battChart.update();
-
-        soilVpdChart.data.labels = labels;
-        soilVpdChart.data.datasets[0].data = hist.map(h => h.soil_moisture);
-        soilVpdChart.data.datasets[1].data = hist.map(h => h.vpd);
-        soilVpdChart.update();
-      } catch(e) {
-        console.error("Dashboard refresh error:", e);
-      }
-    }
-
-    async function loadCurrentConfig() {
-      try {
-        const res = await fetch('/api/config');
-        const d = await res.json();
-        document.getElementById('cfg_low_batt').value = d.low_batt;
-        document.getElementById('cfg_night_lux').value = d.night_lux;
-        document.getElementById('cfg_day_sleep').value = d.day_sleep;
-        document.getElementById('cfg_night_sleep').value = d.night_sleep;
-      } catch(e) {
-        console.error("Config fetch error:", e);
-      }
-    }
-
-    async function saveRemoteConfig() {
-      const payload = {
-        low_batt: parseFloat(document.getElementById('cfg_low_batt').value),
-        night_lux: parseFloat(document.getElementById('cfg_night_lux').value),
-        day_sleep: parseInt(document.getElementById('cfg_day_sleep').value),
-        night_sleep: parseInt(document.getElementById('cfg_night_sleep').value)
-      };
-      await fetch('/api/config/update', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-      alert('Configuration pushed! ESP will synchronize on next wake.');
-    }
-	
-	
-	async function loadLatestAiInsight() {
-  try {
-    const res = await fetch('/api/ai/latest');
-    const data = await res.json();
-    if (data && data.summary) {
-      document.getElementById('ai-summary').innerText = data.summary;
-      document.getElementById('ai-advice').innerText = data.irrigation_advice;
-      document.getElementById('ai-timestamp').innerText = `Evaluated: ${data.timestamp} (${data.model_used})`;
-    }
-  } catch(e) {
-    console.error("AI Insight load error:", e);
-  }
-}
-
-async function requestAiAnalysis() {
-  const btn = document.getElementById('btn-run-ai');
-  btn.innerText = "Analyzing...";
-  btn.disabled = true;
-
-  try {
-    const res = await fetch('/api/ai/analyze', { method: 'POST' });
-    const data = await res.json();
-    if (data.summary) {
-      document.getElementById('ai-summary').innerText = data.summary;
-      document.getElementById('ai-advice').innerText = data.irrigation_advice;
-      document.getElementById('ai-timestamp').innerText = `Evaluated: Just now`;
-    } else if (data.error) {
-      alert("AI Error: " + data.error);
-    }
-  } catch(e) {
-    alert("Request failed: " + e);
-  } finally {
-    btn.innerText = "⚡ Run Analysis";
-    btn.disabled = false;
-  }
-}
-
-    // Consolidated single initialization handler
-  window.onload = () => {
-  initCharts();
-  refresh();
-  loadCurrentConfig();
-  loadLatestAiInsight(); // <--- Fetch last saved insight on page open
-  setInterval(refresh, 15000);
-};
-  </script>
+  <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 </body>
 </html>
