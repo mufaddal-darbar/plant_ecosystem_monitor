@@ -542,35 +542,35 @@ void connectWiFi() {
 
 
 // Helper: Draws a 4-bar Wi-Fi icon at coordinates (x, y)
-void drawWifiIcon(int16_t x, int16_t y, int32_t rssi, bool connected) {
-  if (!connected) {
-    // Draw an 'X' icon if Wi-Fi is offline
-    display.drawLine(x, y, x + 8, y + 8, SSD1306_WHITE);
-    display.drawLine(x + 8, y, x, y + 8, SSD1306_WHITE);
-    return;
-  }
+// void drawWifiIcon(int16_t x, int16_t y, int32_t rssi, bool connected) {
+//   if (!connected) {
+//     // Draw an 'X' icon if Wi-Fi is offline
+//     display.drawLine(x, y, x + 8, y + 8, SSD1306_WHITE);
+//     display.drawLine(x + 8, y, x, y + 8, SSD1306_WHITE);
+//     return;
+//   }
 
-  // Determine number of active bars based on RSSI (dBm)
-  int bars = 1;
-  if (rssi >= -60)      bars = 4; // Excellent
-  else if (rssi >= -70) bars = 3; // Good
-  else if (rssi >= -80) bars = 2; // Fair
-  else                  bars = 1; // Weak
+//   // Determine number of active bars based on RSSI (dBm)
+//   int bars = 1;
+//   if (rssi >= -60)      bars = 4; // Excellent
+//   else if (rssi >= -70) bars = 3; // Good
+//   else if (rssi >= -80) bars = 2; // Fair
+//   else                  bars = 1; // Weak
 
-  // Dimensions: 4 bars, 2px wide each, with 1px gap
-  // Heights: 2px, 4px, 6px, 8px
-  for (int i = 0; i < 4; i++) {
-    int barHeight = (i + 1) * 2;
-    int barX = x + (i * 3);
-    int barY = y + (8 - barHeight);
+//   // Dimensions: 4 bars, 2px wide each, with 1px gap
+//   // Heights: 2px, 4px, 6px, 8px
+//   for (int i = 0; i < 4; i++) {
+//     int barHeight = (i + 1) * 2;
+//     int barX = x + (i * 3);
+//     int barY = y + (8 - barHeight);
 
-    if (i < bars) {
-      display.fillRect(barX, barY, 2, barHeight, SSD1306_WHITE); // Active bar
-    } else {
-      display.drawPixel(barX, y + 7, SSD1306_WHITE);              // Dim/inactive base dot
-    }
-  }
-}
+//     if (i < bars) {
+//       display.fillRect(barX, barY, 2, barHeight, SSD1306_WHITE); // Active bar
+//     } else {
+//       display.drawPixel(barX, y + 7, SSD1306_WHITE);              // Dim/inactive base dot
+//     }
+//   }
+// }
 
 void drawWifiIcon(int16_t x, int16_t y, int32_t rssi, bool connected) {
   if (!connected) {
@@ -741,7 +741,7 @@ void loop() {
       payload += "\"humidity\":" + String(currentHum, 1) + ",";
       payload += "\"soil_moisture\":" + String(soilPct, 1) + ",";
       payload += "\"lux\":" + String(estimatedLux, 0) + ",";
-      payload += "\"timestamp\":\"" + String(dateStr) + " " + String(timeStr) + "\"";
+      payload += "\"timestamp\":\"" + String(dateStr) + " " + String(timeStr) + "\",";
       payload += "\"config_ver\":" + String(sysThresh.configVersion);
       payload += "}";
 
