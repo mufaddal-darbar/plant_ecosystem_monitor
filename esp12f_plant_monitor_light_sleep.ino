@@ -53,6 +53,52 @@ const char* LOCAL_SERVER_HOST  = "192.168.31.113";
 const uint16_t LOCAL_SERVER_PORT = 7000;
 
 
+// 10x8 pixel Wi-Fi wave bitmaps (Stored in Flash PROGMEM, 0 bytes RAM)
+const unsigned char PROGMEM wifi_full[] = {
+  0b00111111, 0b00000000, //   ******
+  0b01111111, 0b10000000, //  ********
+  0b11000000, 0b11000000, // **      **
+  0b00111111, 0b00000000, //   ******
+  0b01000000, 0b10000000, //  *      *
+  0b00011110, 0b00000000, //    ****
+  0b00001100, 0b00000000, //     **
+  0b00001100, 0b00000000  //     ** (center dot)
+};
+
+const unsigned char PROGMEM wifi_med[] = {
+  0b00000000, 0b00000000,
+  0b00000000, 0b00000000,
+  0b00000000, 0b00000000,
+  0b00111111, 0b00000000, //   ******
+  0b01000000, 0b10000000, //  *      *
+  0b00011110, 0b00000000, //    ****
+  0b00001100, 0b00000000, //     **
+  0b00001100, 0b00000000  //     ** (center dot)
+};
+
+const unsigned char PROGMEM wifi_low[] = {
+  0b00000000, 0b00000000,
+  0b00000000, 0b00000000,
+  0b00000000, 0b00000000,
+  0b00000000, 0b00000000,
+  0b00000000, 0b00000000,
+  0b00011110, 0b00000000, //    ****
+  0b00001100, 0b00000000, //     **
+  0b00001100, 0b00000000  //     ** (center dot)
+};
+
+const unsigned char PROGMEM wifi_dot[] = {
+  0b00000000, 0b00000000,
+  0b00000000, 0b00000000,
+  0b00000000, 0b00000000,
+  0b00000000, 0b00000000,
+  0b00000000, 0b00000000,
+  0b00000000, 0b00000000,
+  0b00001100, 0b00000000, //     **
+  0b00001100, 0b00000000  //     ** (center dot)
+};
+
+
 // ================= HARDWARE DEFINITIONS ==================
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -504,6 +550,23 @@ void connectWiFi() {
   //checkPullOTA();
 }
 
+void drawWifiIcon(int16_t x, int16_t y, int32_t rssi, bool connected) {
+  if (!connected) {
+    display.drawLine(x + 1, y, x + 9, y + 8, SSD1306_WHITE);
+    display.drawLine(x + 9, y, x + 1, y + 8, SSD1306_WHITE);
+    return;
+  }
+
+  const unsigned char* icon = wifi_dot;
+  if (rssi >= -60)      icon = wifi_full; // 3 Waves + Dot
+  else if (rssi >= -70) icon = wifi_med;  // 2 Waves + Dot
+  else if (rssi >= -80) icon = wifi_low;  // 1 Wave + Dot
+
+  display.drawBitmap(x, y, icon, 10, 8, SSD1306_WHITE);
+}
+
+
+
 void setup() {
   awakeStartTime = millis();
   Serial.begin(115200);
@@ -594,13 +657,15 @@ void loop() {
     display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
 
     // Row 1 (Y=11): Date | Wi-Fi RSSI (or OFFLINE) | Batt %
-    // Example: "21-Sep-26 -65dBm 98%"
     display.setCursor(0, 11);
-    if (WiFi.status() == WL_CONNECTED) {
-      display.printf("%s %3ddB %3d%%", dateStr, (int)wifiRssi, batteryPercent);
-    } else {
-      display.printf("%s NO-NET %3d%%", dateStr, batteryPercent);
-    }
+    display.printf("%s", dateStr); // Displays "2026-09-23"
+
+    // Draws radial wave icon at (X=78, Y=11)
+    bool isConnected = (WiFi.status() == WL_CONNECTED);
+    drawWifiIcon(78, 11, wifiRssi, isConnected);
+
+    display.setCursor(95, 11);
+    display.printf("%3d%%", batteryPercent); // Displays " 93%"
 
     // Row 2 (Y=24): Soil Moisture % & Raw ADC
     display.setCursor(0, 24);
